@@ -24,8 +24,10 @@ export TESTACC_K3S_KUBECONFIG_NAME=${TESTACC_K3S_KUBECONFIG_NAME:-"testacc_kubec
 TESTACC_K3S_KUBECONFIG=${TESTACC_TEMP_DIR}"/"${TESTACC_K3S_KUBECONFIG_NAME}
 TESTACC_K3S_PORT=${TESTACC_K3S_PORT:-6443}
 TESTACC_K3S_SECRET=${TESTACC_K3S_SECRET:-"somethingtotallyrandom"}
+TESTACC_K3S_VERSION=${TESTACC_K3S_VERSION:-"v0.4.0"}
 
 TESTACC_RANCHER_PORT=${TESTACC_RANCHER_PORT:-44443}
+TESTACC_RANCHER_VERSION=${TESTACC_RANCHER_VERSION:-"v2.2.2"}
 
 # Download required software if not available
 ## jq
@@ -68,7 +70,7 @@ fi
 # Starting rancher server
 rancher_server=$(${DOCKER_BIN} run -d \
   ${rancher_exposed_port} \
-  rancher/rancher:latest --https-listen-port=${TESTACC_RANCHER_PORT})
+  rancher/rancher:${TESTACC_RANCHER_VERSION} --https-listen-port=${TESTACC_RANCHER_PORT})
 rancher_server_ip=$(${DOCKER_BIN} inspect ${rancher_server} -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
 echo ${rancher_server} >> ${TESTACC_DOCKER_LIST}
 
@@ -81,7 +83,7 @@ k3s_server=$(${DOCKER_BIN} run -d \
   -e K3S_CLUSTER_SECRET=${TESTACC_K3S_SECRET} \
   -e K3S_KUBECONFIG_OUTPUT=/tmp/${TESTACC_K3S_KUBECONFIG_NAME} \
   -e K3S_KUBECONFIG_MODE=666 \
-  rancher/k3s:v0.2.0 server --disable-agent --https-listen-port ${TESTACC_K3S_PORT})
+  rancher/k3s:${TESTACC_K3S_VERSION} server --disable-agent --https-listen-port ${TESTACC_K3S_PORT})
 echo ${k3s_server} >> ${TESTACC_DOCKER_LIST}
 k3s_server_ip=$(${DOCKER_BIN} inspect ${k3s_server} -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
 k3s_node=$(${DOCKER_BIN} run -d \
@@ -90,7 +92,7 @@ k3s_node=$(${DOCKER_BIN} run -d \
   --tmpfs /var/run \
   -e K3S_URL=https://${k3s_server_ip}:${TESTACC_K3S_PORT} \
   -e K3S_CLUSTER_SECRET=${TESTACC_K3S_SECRET} \
-  rancher/k3s:v0.2.0)
+  rancher/k3s:${TESTACC_K3S_VERSION})
 echo ${k3s_node} >> ${TESTACC_DOCKER_LIST}
 
 export RANCHER_ACC_CLUSTER_NAME=bootstrap-imported-k3s-cluster
@@ -107,6 +109,7 @@ done
 
 ## Resetting rancher admin password
 rancher_password=$(${DOCKER_BIN} exec -i ${rancher_server} reset-password | grep -v '^New'|tr -d '\r')
+export RANCHER_ADMIN_PASS=${rancher_password}
 
 ## Admin login in rancher server
 login_token=$(${DOCKER_BIN} exec -i ${rancher_server} curl -X POST -sk "${RANCHER_URL}/v3-public/localProviders/local?action=login" \
@@ -178,4 +181,12 @@ manifest_url=$(${DOCKER_BIN} exec -i ${rancher_server} curl -sk -X GET -H "Autho
 ## Applying manifest on k3s cluster
 ${DOCKER_BIN} exec -i ${rancher_server} curl -sfLk ${manifest_url} | KUBECONFIG=${TESTACC_K3S_KUBECONFIG} ${KUBECTL_BIN} apply -f -
 
+## Waiting for k3s cluster becomes active
+while [ "${cluster_ready}" != "active" ]; do
+  sleep 10
+  cluster_ready=$(${DOCKER_BIN} exec -i ${rancher_server} curl -sk -H "Authorization: Bearer ${rancher_token}" \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json' \
+    ${RANCHER_URL}/v3/clusters/${cluster_id} | ${JQ_BIN} -r '.state')
+done
 

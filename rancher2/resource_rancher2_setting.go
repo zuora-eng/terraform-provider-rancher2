@@ -10,89 +10,6 @@ import (
 	managementClient "github.com/rancher/types/client/management/v3"
 )
 
-//Schemas
-
-func settingFields() map[string]*schema.Schema {
-	s := map[string]*schema.Schema{
-		"name": &schema.Schema{
-			Type:     schema.TypeString,
-			Required: true,
-			ForceNew: true,
-		},
-		"value": &schema.Schema{
-			Type:     schema.TypeString,
-			Required: true,
-		},
-		"annotations": &schema.Schema{
-			Type:     schema.TypeMap,
-			Optional: true,
-			Computed: true,
-		},
-		"labels": &schema.Schema{
-			Type:     schema.TypeMap,
-			Optional: true,
-			Computed: true,
-		},
-	}
-
-	return s
-}
-
-// Flatteners
-
-func flattenSetting(d *schema.ResourceData, in *managementClient.Setting) error {
-	if in == nil {
-		return fmt.Errorf("[ERROR] flattening setting: Input setting is nil")
-	}
-
-	d.SetId(in.ID)
-
-	err := d.Set("name", in.Name)
-	if err != nil {
-		return err
-	}
-	err = d.Set("value", in.Value)
-	if err != nil {
-		return err
-	}
-	err = d.Set("annotations", toMapInterface(in.Annotations))
-	if err != nil {
-		return err
-	}
-	err = d.Set("labels", toMapInterface(in.Labels))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Expanders
-
-func expandSetting(in *schema.ResourceData) (*managementClient.Setting, error) {
-	obj := &managementClient.Setting{}
-	if in == nil {
-		return nil, fmt.Errorf("[ERROR] expanding setting: Input ResourceData is nil")
-	}
-
-	if v := in.Id(); len(v) > 0 {
-		obj.ID = v
-	}
-
-	obj.Name = in.Get("name").(string)
-	obj.Value = in.Get("value").(string)
-
-	if v, ok := in.Get("annotations").(map[string]interface{}); ok && len(v) > 0 {
-		obj.Annotations = toMapString(v)
-	}
-
-	if v, ok := in.Get("labels").(map[string]interface{}); ok && len(v) > 0 {
-		obj.Labels = toMapString(v)
-	}
-
-	return obj, nil
-}
-
 func resourceRancher2Setting() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceRancher2SettingCreate,
@@ -281,24 +198,6 @@ func resourceRancher2SettingDelete(d *schema.ResourceData, meta interface{}) err
 
 	d.SetId("")
 	return nil
-}
-
-func resourceRancher2SettingImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	client, err := meta.(*Config).ManagementClient()
-	if err != nil {
-		return []*schema.ResourceData{}, err
-	}
-	setting, err := client.Setting.ByID(d.Id())
-	if err != nil {
-		return []*schema.ResourceData{}, err
-	}
-
-	err = flattenSetting(d, setting)
-	if err != nil {
-		return []*schema.ResourceData{}, err
-	}
-
-	return []*schema.ResourceData{d}, nil
 }
 
 // settingStateRefreshFunc returns a resource.StateRefreshFunc, used to watch a Rancher Project.

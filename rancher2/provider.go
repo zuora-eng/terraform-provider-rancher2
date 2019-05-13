@@ -26,7 +26,7 @@ func Provider() terraform.ResourceProvider {
 		Schema: map[string]*schema.Schema{
 			"api_url": &schema.Schema{
 				Type:        schema.TypeString,
-				Optional:    true,
+				Required:    true,
 				DefaultFunc: schema.EnvDefaultFunc("RANCHER_URL", ""),
 				Description: descriptions["api_url"],
 			},
@@ -36,6 +36,12 @@ func Provider() terraform.ResourceProvider {
 				Sensitive:   true,
 				DefaultFunc: schema.EnvDefaultFunc("RANCHER_ACCESS_KEY", ""),
 				Description: descriptions["access_key"],
+			},
+			"bootstrap": &schema.Schema{
+				Type:        schema.TypeBool,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("RANCHER_BOOTSTRAP", false),
+				Description: descriptions["bootstrap"],
 			},
 			"secret_key": &schema.Schema{
 				Type:        schema.TypeString,
@@ -73,10 +79,14 @@ func Provider() terraform.ResourceProvider {
 			"rancher2_auth_config_github":            resourceRancher2AuthConfigGithub(),
 			"rancher2_auth_config_openldap":          resourceRancher2AuthConfigOpenLdap(),
 			"rancher2_auth_config_ping":              resourceRancher2AuthConfigPing(),
+			"rancher2_bootstrap":                     resourceRancher2Bootstrap(),
 			"rancher2_catalog":                       resourceRancher2Catalog(),
+			"rancher2_cloud_credential":              resourceRancher2CloudCredential(),
 			"rancher2_cluster":                       resourceRancher2Cluster(),
+			"rancher2_cluster_driver":                resourceRancher2ClusterDriver(),
 			"rancher2_cluster_logging":               resourceRancher2ClusterLogging(),
 			"rancher2_cluster_role_template_binding": resourceRancher2ClusterRoleTemplateBinding(),
+			"rancher2_etcd_backup":                   resourceRancher2EtcdBackup(),
 			"rancher2_node_driver":                   resourceRancher2NodeDriver(),
 			"rancher2_node_pool":                     resourceRancher2NodePool(),
 			"rancher2_node_template":                 resourceRancher2NodeTemplate(),
@@ -110,6 +120,8 @@ func init() {
 		"insecure": "Allow insecure connections to Rancher. Mandatory if self signed tls and not ca_certs provided",
 
 		"api_url": "The URL to the rancher API",
+
+		"bootstrap": "Bootstrap rancher server",
 	}
 }
 
@@ -120,28 +132,37 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	tokenKey := d.Get("token_key").(string)
 	caCerts := d.Get("ca_certs").(string)
 	insecure := d.Get("insecure").(bool)
+	bootstrap := d.Get("bootstrap").(bool)
 
 	if apiURL == "" {
 		return &Config{}, fmt.Errorf("[ERROR] No api_url provided")
 	}
 
 	config := &Config{
-		URL:       apiURL,
+		URL:       NormalizeURL(apiURL),
 		AccessKey: accessKey,
 		SecretKey: secretKey,
 		TokenKey:  tokenKey,
 		CACerts:   caCerts,
 		Insecure:  insecure,
+		Bootstrap: bootstrap,
 	}
 
-	// If token nor access key and secret key are not provided
-	if config.TokenKey == "" && (config.AccessKey == "" || config.SecretKey == "") {
-		return &Config{}, fmt.Errorf("[ERROR] No token_key nor access_key and secret_key nor admin_pass provided")
-	}
+	// If bootstrap tokenkey accesskey nor secretkey can be provided
+	if bootstrap {
+		if config.TokenKey != "" || config.AccessKey != "" || config.SecretKey != "" {
+			return &Config{}, fmt.Errorf("[ERROR] Bootsrap mode activated. Token_key or access_key and secret_key can not be provided")
+		}
+	} else {
+		// Else token or access key and secret key should be provided
+		if config.TokenKey == "" && (config.AccessKey == "" || config.SecretKey == "") {
+			return &Config{}, fmt.Errorf("[ERROR] No token_key nor access_key and secret_key are provided")
+		}
 
-	_, err := config.ManagementClient()
-	if err != nil {
-		return &Config{}, err
+		_, err := config.ManagementClient()
+		if err != nil {
+			return &Config{}, err
+		}
 	}
 
 	return config, nil
